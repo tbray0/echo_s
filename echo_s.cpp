@@ -1,25 +1,49 @@
-// **************************************************************************************
-// * Echo Strings (echo_s.cc)
-// * -- Accepts TCP connections and then echos back each string sent.
-// **************************************************************************************
-#include "echo_s.h"
-#include "logging.h"
-
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <filesystem>
-#include <cstring>
-#include <unistd.h>
 
 #define MAX_BUFFER_SIZE 1024
 
-// **************************************************************************************
-// * processConnection()
-// * - Handles reading the line from the network and sending it back to the client.
-// * - Returns true if the client sends "QUIT" command, false if the client sends "CLOSE".
-// **************************************************************************************
+// Log levels
+int LOG_LEVEL = 0; // Default log level
+
+void log_trace(const std::string &msg) {
+    if (LOG_LEVEL >= 6) {
+        std::cerr << "TRACE: " << msg << std::endl;
+    }
+}
+
+void log_debug(const std::string &msg) {
+    if (LOG_LEVEL >= 5) {
+        std::cerr << "DEBUG: " << msg << std::endl;
+    }
+}
+
+void log_info(const std::string &msg) {
+    if (LOG_LEVEL >= 3) {
+        std::cerr << "INFO: " << msg << std::endl;
+    }
+}
+
+void log_warning(const std::string &msg) {
+    if (LOG_LEVEL >= 2) {
+        std::cerr << "WARNING: " << msg << std::endl;
+    }
+}
+
+void log_error(const std::string &msg) {
+    if (LOG_LEVEL >= 1) {
+        std::cerr << "ERROR: " << msg << std::endl;
+    }
+}
+
+void log_fatal(const std::string &msg) {
+    if (LOG_LEVEL >= 0) {
+        std::cerr << "FATAL: " << msg << std::endl;
+    }
+}
+
 int processConnection(int sockFd) {
     char buffer[MAX_BUFFER_SIZE];
     bool keepGoing = true;
@@ -27,38 +51,38 @@ int processConnection(int sockFd) {
 
     while (keepGoing) {
         memset(buffer, 0, sizeof(buffer));
+        log_trace("Waiting for data...");
         ssize_t bytesRead = read(sockFd, buffer, sizeof(buffer));
 
         if (bytesRead > 0) {
-            // Debugging: Received data
-            DEBUG std::cout << "Received: " << buffer << ENDL;
+            log_trace("Received data, processing...");
+            log_debug("Received: " + std::string(buffer));
 
             // Check for CLOSE or QUIT
             if (strncmp(buffer, "CLOSE", 5) == 0) {
                 keepGoing = false;
-                DEBUG std::cout << "Connection closed by client." << ENDL;
+                log_debug("Connection closed by client.");
+                log_trace("CLOSE command received.");
             } else if (strncmp(buffer, "QUIT", 4) == 0) {
                 keepGoing = false;
                 quitProgram = true;
-                DEBUG std::cout << "Server quitting." << ENDL;
+                log_debug("Server quitting.");
+                log_trace("QUIT command received.");
             }
 
-            // Echo data back to client
+            // Echo data back to client only if it's not CLOSE/QUIT
+            if (!keepGoing) continue;
+
+            log_trace("Echoing data back to client.");
             write(sockFd, buffer, bytesRead);
         } else if (bytesRead == 0) {
             keepGoing = false; // Client closed connection
+            log_trace("Client closed the connection.");
         }
     }
 
     return quitProgram;
 }
-    
-
-
-// **************************************************************************************
-// * main()
-// * - Sets up the sockets and accepts new connection until processConnection() returns 1
-// **************************************************************************************
 
 int main(int argc, char *argv[]) {
     // Parse command line arguments for debug level
@@ -74,13 +98,16 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    log_trace("Starting server setup...");
+
     // Create socket
     int listenFd = socket(AF_INET, SOCK_STREAM, 0);
     if (listenFd < 0) {
-        FATAL std::cerr << "Socket creation failed" << ENDL;
+        log_fatal("Socket creation failed");
         exit(-1);
     }
-    INFO std::cout << "Socket created successfully." << ENDL;
+    log_info("Socket created successfully.");
+    log_trace("Socket FD: " + std::to_string(listenFd));
 
     // Bind the socket to an address
     struct sockaddr_in servaddr;
@@ -93,36 +120,42 @@ int main(int argc, char *argv[]) {
     while (!bindSuccessful) {
         if (bind(listenFd, (struct sockaddr*)&servaddr, sizeof(servaddr)) == 0) {
             bindSuccessful = true;
-            INFO std::cout << "Socket bound to port: " << ntohs(servaddr.sin_port) << ENDL;
+            std::cout << ("Using port: " + std::to_string(ntohs(servaddr.sin_port))) << msg << std::endl;
+            log_info("Socket bound to port: " + std::to_string(ntohs(servaddr.sin_port)));
+            log_trace("Socket binding succeeded.");
         } else {
-            WARNING std::cerr << "Port binding failed, retrying..." << ENDL;
+            log_warning("Port binding failed, retrying...");
             servaddr.sin_port = htons(ntohs(servaddr.sin_port) + 1); // Try next port
         }
     }
 
     // Listen for connections
     if (listen(listenFd, 1) != 0) {
-        FATAL std::cerr << "Listening failed" << ENDL;
+        log_fatal("Listening failed");
         exit(-1);
     }
-    INFO std::cout << "Server is listening..." << ENDL;
+    log_info("Server is listening...");
+    log_trace("Socket now listening for connections.");
 
     // Accept and process connections
     bool quitProgram = false;
     while (!quitProgram) {
+        log_trace("Waiting for a new connection...");
         int connFd = accept(listenFd, NULL, NULL);
         if (connFd < 0) {
-            FATAL std::cerr << "Connection acceptance failed" << ENDL;
+            log_fatal("Connection acceptance failed");
             exit(-1);
         }
-        INFO std::cout << "Connection accepted." << ENDL;
+        log_info("Connection accepted.");
+        log_trace("New connection on FD: " + std::to_string(connFd));
 
         // Process the connection
         quitProgram = processConnection(connFd);
         close(connFd);
+        log_trace("Connection closed.");
     }
 
     close(listenFd);
-    INFO std::cout << "Server shut down." << ENDL;
+    log_info("Server shut down.");
     return 0;
 }
